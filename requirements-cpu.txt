@@ -1,0 +1,1 @@
+# Exact pins for CPU-only machines (empty: this module has no heavy dependency).

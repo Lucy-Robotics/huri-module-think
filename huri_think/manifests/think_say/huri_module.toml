@@ -1,0 +1,7 @@
+name = "think_say"
+summary = "Thinks aloud (\"hmm...\", \"let me think\") in the TTS's Piper voice until the answer starts"
+input = { topic = "huri.question", event = "huri_events.question:RAGQuestion" }
+output = { topic = "huri.audio.out", event = "huri_events.audio:Audio" }
+events = ["huri-events>=0.2,<0.3"]
+requires = { gpu = false, actuation = false }
+huri_core = ">=0.4,<0.5"

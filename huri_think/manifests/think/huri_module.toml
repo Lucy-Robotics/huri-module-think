@@ -1,0 +1,9 @@
+# What the module is, readable without importing it (HuRI's startup check and
+# the hub use it). Keep it in step with the module class.
+name = "think"
+summary = "Moves like someone thinking until the answer starts (generated SMPL-X)"
+input = { topic = "huri.question", event = "huri_events.question:RAGQuestion" }
+output = { topic = "huri.motion", event = "huri_events.motion:Motion" }
+events = ["huri-events>=0.2,<0.3"]
+requires = { gpu = false, actuation = false }
+huri_core = ">=0.4,<0.5"

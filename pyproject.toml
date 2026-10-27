@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=64,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "huri-module-think"
+version = "0.1.0"
+description = "HuRI modules: generated thinking motion and thinking aloud while the answer is prepared"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "huri-core[server]>=0.4,<0.5",
+  "huri-events>=0.2,<0.3",          # the curated events it consumes and emits
+  "numpy>=1.26",
+  "piper-tts>=1.8,<1.9",            # think_say speaks with the TTS's Piper voice
+]
+
+# Edit these: point them at your module's repository (pip and package indexes
+# show them to whoever installs the module).
+[project.urls]
+Homepage = "https://github.com/your-org/huri-module-think"
+Repository = "https://github.com/your-org/huri-module-think"
+Issues = "https://github.com/your-org/huri-module-think/issues"
+
+[project.optional-dependencies]
+# flake8-pyproject: flake8 alone does not read [tool.flake8] below.
+dev = ["pytest>=8", "black>=24", "isort>=5", "flake8>=7", "flake8-pyproject>=1.2"]
+
+# How HuRI finds the modules: once installed, `name: think` (think_say, think_token,
+# think_stop) works in a client's YAML (and the server's HURI_MODULES).
+[project.entry-points."huri.modules"]
+think = "huri_think.module:Think"
+think_say = "huri_think.module:ThinkSay"
+think_token = "huri_think.module:ThinkToken"
+think_stop = "huri_think.module:ThinkStop"
+
+[tool.setuptools.packages.find]
+include = ["huri_think*"]
+
+[tool.setuptools.package-data]
+huri_think = ["manifests/*/huri_module.toml"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+known_first_party = ["huri_think"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203"]
+exclude = [".git", "__pycache__", ".venv", "venv", "build", "dist", "*.egg-info"]

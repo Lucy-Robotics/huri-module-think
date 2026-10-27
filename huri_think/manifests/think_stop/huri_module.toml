@@ -1,0 +1,7 @@
+# Terminal: no output. Ends the thinking of `think` and `think_say`.
+name = "think_stop"
+summary = "Ends the thinking of think and think_say when the answer is heard"
+input = { topic = "huri.audio.out", event = "huri_events.audio:Audio" }
+events = ["huri-events>=0.2,<0.3"]
+requires = { gpu = false, actuation = false }
+huri_core = ">=0.4,<0.5"

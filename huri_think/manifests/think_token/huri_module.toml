@@ -1,0 +1,7 @@
+# Terminal: no output. Silences `think_say` once the answer is being written.
+name = "think_token"
+summary = "Silences think_say once the answer is being written (its voice comes soon)"
+input = { topic = "huri.token", event = "huri_events.text:Token" }
+events = ["huri-events>=0.2,<0.3"]
+requires = { gpu = false, actuation = false }
+huri_core = ">=0.4,<0.5"
