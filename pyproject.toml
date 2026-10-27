@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "huri-core[server]>=0.4,<0.5",
-  "huri-events>=0.2,<0.3",          # the curated events it consumes and emits
+  "huri-events>=0.1,<0.3",          # the curated events it consumes and emits
   "numpy>=1.26",
   "piper-tts>=1.8,<1.9",            # think_say speaks with the TTS's Piper voice
 ]

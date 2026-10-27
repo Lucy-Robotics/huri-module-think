@@ -66,7 +66,7 @@ CI does the same through `HURI_CORE_REF` and `HURI_MODULES_REF`
 `flake8` (installed by the `dev` extra).
 
 The module introduces no event: it consumes and emits curated ones
-(`huri-events>=0.2,<0.3`).
+(`huri-events>=0.1,<0.3`).
 
 ### Hearing and seeing it without a server
 
