@@ -1,29 +1,16 @@
-"""Thinking while the answer is being prepared.
-
-Between a question and the first word of its answer, the LLM (and the TTS
-after it) take seconds during which the robot would freeze. These modules
-fill that gap with generated behaviour, and stop as soon as the answer is
-heard:
-
-    huri.question ──> think      ──> huri.motion     (gaze aversion, head tilt,
-                  │                                    thinking poses, fidgets)
-                  └─> think_say  ──> huri.audio.out  ("hmm...", "let me think",
-                                                       in the TTS's voice)
-    huri.token    ──> think_token                    (the answer is written:
-                                                       think_say falls silent)
-    huri.audio.out ─> think_stop                     (the answer is heard)
-
-`think_token` and `think_stop` tell the others how far the answer got; they
-only share the session's user id. Without them, they think until their
-`max_s`. The thinking ends with the answer's voice, not its first token: the
-TTS waits for a whole sentence, seconds during which the robot would freeze
-again.
-"""
-
 import asyncio
 import time
 import weakref
-from typing import AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 
 import numpy as np
 from huri_core.core.module import ModuleWithId
@@ -32,24 +19,21 @@ from huri_events.motion import Motion
 from huri_events.question import RAGQuestion
 from huri_events.text import Token
 
+from huri_think.body import Body
 from huri_think.motion import ThinkingMotion
 from huri_think.speech import HUMS, OPENERS, STALLS, ThinkingVoice, pick
 
-_EXPR_DIM = 100  # Motion's facial expression coefficients, left neutral
-_POLL_S = 0.05  # how often a waiting module checks that the answer started
-_BREATH_S = 1.0  # least silence between two thinking phrases
+_EXPR_DIM = 100
+_POLL_S = 0.05
+_BREATH_S = 1.0
 
 
 HEARD, WRITTEN = "heard", "written"
 
 
 class AnswerSignals:
-    """When each user's answer was last written (its tokens) and heard (its
-    voice), shared by a session's modules.
-
-    The modules of a session run in the same process (the HuRI deployment),
-    and know nothing of each other but the session's user id.
-    """
+    """The modules of a session run in the same process (the HuRI deployment),
+    and know nothing of each other but the session's user id."""
 
     def __init__(self) -> None:
         self._at: Dict[Tuple[str, str], float] = {}
@@ -67,7 +51,6 @@ class AnswerSignals:
 
 SIGNALS = AnswerSignals()
 
-# The audio think_say sends, which think_stop must not take for the answer.
 # The session's bus hands every module the very object a module yielded.
 _SPOKEN: "weakref.WeakValueDictionary[int, Audio]" = weakref.WeakValueDictionary()
 
@@ -82,16 +65,11 @@ def _is_own(audio: Audio) -> bool:
 
 
 class _Timed(ModuleWithId):
-    """The clock the modules of this package share (a fake one in tests)."""
-
     _clock: Callable[[], float] = staticmethod(time.monotonic)
     _sleep: Callable[[float], Awaitable[None]] = staticmethod(asyncio.sleep)
 
 
 class _Thinking(_Timed):
-    """What `think` and `think_say` share: one episode per question, ended by
-    the answer, by a newer question, or by `max_s`."""
-
     def __init__(self, _user_id: str, delay_s: float, max_s: float, seed):
         super().__init__(_user_id)
         if delay_s < 0 or max_s <= 0:
@@ -113,8 +91,6 @@ class _Thinking(_Timed):
         )
 
     async def _wait_until(self, deadline: float, episode: int, since: float) -> bool:
-        """Sleep until `deadline`; False as soon as the episode is over."""
-
         while not self._over(episode, since):
             left = deadline - self._clock()
             if left <= 0:
@@ -129,10 +105,6 @@ class Think(_Thinking):
     input: huri.question (RAGQuestion)
     output: huri.motion (Motion)
 
-    Streams Motion chunks of generated SMPL-X poses in real time (a little
-    ahead of it), pts counting from 0 like an utterance; once the answer
-    starts, a last chunk eases back to the neutral pose (arms down).
-
     :fps: frame rate of the motion.
     :chunk_s: length of each Motion chunk (seconds).
     :lead_s: how far ahead of real time a chunk is sent, to absorb latency.
@@ -142,6 +114,9 @@ class Think(_Thinking):
     :intensity: amplitude of the motion (0 still, 1 natural, 2 theatrical).
     :arms: allow the thinking poses (hand at the chin, arms crossed...).
     :seed: makes the motion reproducible (random by default).
+    :body: measurements of the body that plays the motion (see the README:
+        metres, from the pelvis, SMPL-X axes), so the hands land on it; fields
+        left out keep an adult's of 1.8 m.
     """
 
     input_type = "huri.question"
@@ -161,6 +136,7 @@ class Think(_Thinking):
         intensity: float = 1.0,
         arms: bool = True,
         seed: Optional[int] = None,
+        body: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(_user_id, delay_s, max_s, seed)
         if fps <= 0 or chunk_s <= 0 or lead_s < 0 or settle_s <= 0:
@@ -171,6 +147,7 @@ class Think(_Thinking):
         self.settle_s = float(settle_s)
         self.intensity = float(intensity)
         self.arms = bool(arms)
+        self.body = Body.from_mapping(body)
 
     def _motion(self, poses: np.ndarray, pts: float) -> Motion:
         n = poses.shape[0]
@@ -185,8 +162,10 @@ class Think(_Thinking):
     async def process(self, data: RAGQuestion) -> AsyncGenerator[Motion, None]:
         episode, since = self._begin()
         if not await self._wait_until(since + self.delay_s, episode, since):
-            return  # a quick answer needs no thinking
-        motion = ThinkingMotion(self.fps, self.intensity, self.arms, self.rng)
+            return
+        motion = ThinkingMotion(
+            self.fps, self.intensity, self.arms, self.rng, body=self.body
+        )
         start = self._clock()
         pts = 0.0
         while True:
@@ -194,8 +173,6 @@ class Think(_Thinking):
             pts = motion.t
             if not await self._wait_until(start + pts - self.lead_s, episode, since):
                 break
-        # Even when a newer question took over: its motion starts from the
-        # neutral pose, once this one is back there.
         yield self._motion(motion.settle(self.settle_s), pts)
 
 
@@ -204,16 +181,6 @@ class ThinkSay(_Thinking):
 
     input: huri.question (RAGQuestion)
     output: huri.audio.out (Audio)
-
-    Nothing for a short pause; a hum ("hmm...") if no answer is written after
-    `hum_s`; words ("let me think about that") if still none after
-    `think_s`; then "still thinking..." every `stall_s`, `max_stalls` times.
-    It falls silent once the answer is being written (think_token): its
-    voice comes soon, and a thinking phrase then would delay it.
-
-    Each phrase is synthesized when needed by the Piper voice the TTS speaks
-    with (see huri_think.speech), then sent as one Audio chunk and an empty
-    one with `end`, like a TTS utterance.
 
     :voice: path of the Piper voice (.onnx); by default the TTS's,
         `HURI_PIPER_VOICE`.
@@ -258,14 +225,13 @@ class ThinkSay(_Thinking):
         episode, since = self._begin()
         sr = self.voice.sample_rate
         said: List[str] = []
-        free = since  # when the last phrase ends
+        free = since
         for after, phrases in self.plan:
             due = max(since + after, free + _BREATH_S)
             if not await self._wait_until(due, episode, since):
                 return
             text = pick(phrases, said, self.rng)
             said.append(text)
-            # Piper is CPU-bound: keep the session's event loop free.
             samples = await asyncio.to_thread(self.voice.say, text)
             if self._over(episode, since):
                 return
@@ -305,8 +271,6 @@ class ThinkStop(_Timed):
 
     input: huri.audio.out (Audio)
     output: none
-
-    Any sound on huri.audio.out counts (the TTS's), but think_say's phrases.
     """
 
     input_type = "huri.audio.out"

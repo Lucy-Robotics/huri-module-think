@@ -1,4 +1,3 @@
-# Terminal: no output. Ends the thinking of `think` and `think_say`.
 name = "think_stop"
 summary = "Ends the thinking of think and think_say when the answer is heard"
 input = { topic = "huri.audio.out", event = "huri_events.audio:Audio" }

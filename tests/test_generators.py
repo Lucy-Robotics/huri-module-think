@@ -1,12 +1,9 @@
-"""The motion generator alone: thinking poses."""
-
 import numpy as np
 import pytest
 
 from huri_think.motion import (
     EYE_JOINTS,
     GESTURE_NAMES,
-    GESTURES,
     HEAD,
     L_ELBOW,
     POSE_DIM,
@@ -38,17 +35,14 @@ def test_motion_starts_and_ends_at_rest(seed):
 
 @pytest.mark.parametrize("seed", range(5))
 def test_the_body_moves_smoothly(seed):
-    """At most 270 deg/s at 30 fps (an arm swinging up), but the eyes, which
-    saccade."""
-
     body = np.delete(_degrees(_episode(seed, arms=True)), EYE_JOINTS, axis=1)
     assert np.abs(np.diff(body, axis=0)).max() < 9.0
 
 
 def test_the_head_looks_away():
     head = _degrees(_episode(0))[:, HEAD]
-    assert np.abs(head[:, 1]).max() > 4.0  # yaw: to a side
-    assert np.abs(head[:, 0]).max() > 2.0  # pitch: up or down
+    assert np.abs(head[:, 1]).max() > 4.0
+    assert np.abs(head[:, 0]).max() > 2.0
 
 
 def test_every_episode_is_new():
@@ -70,8 +64,6 @@ def test_the_arms_take_thinking_poses_only_when_allowed():
 
 
 def test_episodes_differ_in_their_poses():
-    """Several poses, left- and right-handed, not one gesture on a loop."""
-
     used = set()
     for seed in range(12):
         motion = ThinkingMotion(rng=np.random.default_rng(seed))
@@ -82,11 +74,19 @@ def test_episodes_differ_in_their_poses():
     assert len(used) >= 5
 
 
+def _pose_deg(body, name):
+    motion = ThinkingMotion(intensity=0.0, arms=False, body=body)
+    motion.arms.go(0.0, np.eye(len(GESTURE_NAMES))[GESTURE_NAMES.index(name)], 0.0)
+    return _degrees(motion._frames(1, plan=False))[0]
+
+
 def test_left_poses_mirror_right_ones():
     for name in ("chin", "chin_hip", "crossed"):
-        right, left = GESTURES[name], GESTURES[name + "_left"]
-        np.testing.assert_allclose(left[L_ELBOW], right[R_ELBOW] * [1, -1, -1])
-        np.testing.assert_allclose(mirrored(left), right)
+        right, left = _pose_deg(None, name), _pose_deg(None, name + "_left")
+        np.testing.assert_allclose(
+            left[L_ELBOW], right[R_ELBOW] * [1, -1, -1], atol=1e-4
+        )
+        np.testing.assert_allclose(mirrored(left), right, atol=1e-4)
 
 
 def test_settle_lowers_a_raised_hand_slowly():
