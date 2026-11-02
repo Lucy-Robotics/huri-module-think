@@ -20,6 +20,14 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
+from huri_think.body import (
+    Body,
+    quat_from_rotvec,
+    rotvec_from_quat,
+    slerp,
+    thinking_arms,
+)
+
 N_JOINTS = 55
 POSE_DIM = N_JOINTS * 3
 
@@ -57,47 +65,61 @@ def mirrored(deg: np.ndarray) -> np.ndarray:
     return out
 
 
-def _pose_deg(angles: Dict[int, Tuple[float, float, float]], curl: float) -> np.ndarray:
-    """Degrees added to the rest pose; `curl` bends the right hand's fingers."""
-
-    deg = np.zeros((N_JOINTS, 3))
-    for joint, xyz in angles.items():
-        deg[joint] += xyz
-    deg[list(R_FINGERS), 2] += curl  # right fingers curl about +z
-    return deg
-
-
-# The thinking poses, degrees added to the rest pose, the right hand active
-# (at the chin, or on top). Solved by forward kinematics on the neutral SMPL-X
-# skeleton, so the hands land where they should and pass in front of the body
-# on the way. Each also exists mirrored, the left hand active.
-_CHIN = {R_SHOULDER: (14, 51, -7), R_ELBOW: (0, 130, 0), R_WRIST: (0, 0, 15)}
-GESTURES = {
-    # Right hand at the chin, left forearm across the belly under its elbow.
-    "chin": _pose_deg({**_CHIN, L_SHOULDER: (40, -71, 6), L_ELBOW: (0, -73, 0)}, 55),
-    # Right hand at the chin, left hand on the hip.
-    "chin_hip": _pose_deg(
-        {**_CHIN, L_SHOULDER: (54, -19, 17), L_ELBOW: (0, -68, 0)}, 55
-    ),
-    # Arms crossed, the right forearm on top.
-    "crossed": _pose_deg(
-        {
-            R_SHOULDER: (32, 72, -15),
-            R_ELBOW: (0, 92, 0),
-            L_SHOULDER: (30, -70, 14),
-            L_ELBOW: (0, -84, 0),
-        },
-        35,
-    ),
-}
-# The left hand of the right-handed poses relaxes too.
-for _deg in GESTURES.values():
-    _deg[list(L_FINGERS), 2] -= 20.0
-GESTURES.update({name + "_left": mirrored(deg) for name, deg in list(GESTURES.items())})
-GESTURE_NAMES = tuple(GESTURES)
-_GESTURE_DEG = np.stack([GESTURES[name] for name in GESTURE_NAMES])
+# The thinking poses: where the hands go, solved on the body (see
+# huri_think.body), the right hand active (at the chin, or on top); each also
+# exists mirrored, the left hand active.
+POSES = ("chin", "chin_hip", "crossed")
+GESTURE_NAMES = POSES + tuple(name + "_left" for name in POSES)
 # +1 when the right hand is the active one, -1 the left.
 _GESTURE_SIDE = np.array([-1.0 if n.endswith("_left") else 1.0 for n in GESTURE_NAMES])
+# The joints the poses solve; the rest of the body is added to them.
+ARM_JOINTS = (L_SHOULDER, R_SHOULDER, L_ELBOW, R_ELBOW, L_WRIST, R_WRIST)
+# Degrees, the right hand active: its fingers curl (a loose fist at the chin,
+# a grip on the arm), its wrist bends a little at the chin; the left hand
+# relaxes.
+_CURL = {"chin": 55.0, "chin_hip": 55.0, "crossed": 35.0}
+_WRIST = {"chin": 15.0, "chin_hip": 15.0, "crossed": 0.0}
+_RELAXED = 20.0
+
+
+def solve_poses(body: Body) -> Tuple[np.ndarray, np.ndarray]:
+    """The thinking poses on `body`, in GESTURE_NAMES' order: the arm joints'
+    local rotations as quaternions (G, 6, 4, in ARM_JOINTS' order), and
+    degrees added to the rest of the pose (G, 55, 3: fingers)."""
+
+    quats = np.zeros((len(GESTURE_NAMES), len(ARM_JOINTS), 4))
+    extra = np.zeros((len(GESTURE_NAMES), N_JOINTS, 3))
+    for g, name in enumerate(GESTURE_NAMES):
+        pose = name.removesuffix("_left")
+        active = 1.0 if name.endswith("_left") else -1.0  # SMPL-X: +1 is left
+        arms = thinking_arms(body, active)[pose]
+        wrist = np.zeros((2, 3))
+        wrist[0 if active > 0 else 1, 2] = -active * _WRIST[pose]
+        rotvecs = [
+            arms[1.0].shoulder,
+            arms[-1.0].shoulder,
+            arms[1.0].elbow,
+            arms[-1.0].elbow,
+            np.radians(wrist[0]),
+            np.radians(wrist[1]),
+        ]
+        quats[g] = [quat_from_rotvec(v) for v in rotvecs]
+        # Fingers curl about z: + on the right hand, - on the left.
+        own, other = (L_FINGERS, R_FINGERS) if active > 0 else (R_FINGERS, L_FINGERS)
+        extra[g, list(own), 2] = -active * _CURL[pose]
+        extra[g, list(other), 2] = active * _RELAXED
+    return quats, extra
+
+
+_REST_QUATS = np.array([quat_from_rotvec(np.radians(REST_DEG[j])) for j in ARM_JOINTS])
+_SOLVED: Dict[Body, Tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _solved(body: Body) -> Tuple[np.ndarray, np.ndarray]:
+    if body not in _SOLVED:
+        _SOLVED[body] = solve_poses(body)
+    return _SOLVED[body]
+
 
 ONSET_S = 0.5  # micro-motion and breathing fade in over this
 ARMS_S = (1.2, 1.6)  # time to bring the arms into a pose, or back down
@@ -157,6 +179,7 @@ class ThinkingMotion:
     :intensity: scales every angle (0: still, 1: natural, 2: theatrical).
     :arms: allow the thinking poses (hand at the chin, arms crossed...).
     :rng: the source of every choice (seed it for a reproducible episode).
+    :body: the body the poses are solved on (default: an adult of 1.8 m).
 
     Frame 0 is the neutral pose and `settle()` ends on it exactly, so the
     motion starts and ends where speech gestures and the robot's rest are.
@@ -168,6 +191,7 @@ class ThinkingMotion:
         intensity: float = 1.0,
         arms: bool = True,
         rng: Optional[np.random.Generator] = None,
+        body: Optional[Body] = None,
     ):
         if fps <= 0:
             raise ValueError(f"fps must be positive, got {fps}")
@@ -175,10 +199,12 @@ class ThinkingMotion:
         self.intensity = float(np.clip(intensity, 0.0, 2.0))
         self.arms_on = arms
         self.rng = rng if rng is not None else np.random.default_rng()
+        self.body = body if body is not None else Body()
+        self._quats, self._extra = _solved(self.body)
 
         self.head = _Channel(3)  # pitch, yaw, roll of the head (degrees)
         self.gaze = _Channel(2)  # pitch, yaw where the eyes look (degrees)
-        self.arms = _Channel(len(GESTURES))  # how far into each thinking pose
+        self.arms = _Channel(len(GESTURE_NAMES))  # how far into each thinking pose
         self.wobble = _Wobble(self.rng, 3, 1.6 * self.intensity)
         self.sway = _Wobble(self.rng, 2, 1.2 * self.intensity)  # weight shifts
         self.breath_hz = self.rng.uniform(0.2, 0.28)
@@ -246,15 +272,15 @@ class ThinkingMotion:
         rng = self.rng
         if self._gesture is not None and rng.random() < 0.5:
             self._gesture = None  # back down for a while
-            self.arms.go(t, np.zeros(len(GESTURES)), rng.uniform(*ARMS_S))
+            self.arms.go(t, np.zeros(len(GESTURE_NAMES)), rng.uniform(*ARMS_S))
             self._next_arms = t + rng.uniform(*ARMS_S) + rng.uniform(1.0, 3.0)
             return
-        others = [k for k in range(len(GESTURES)) if k != self._gesture]
+        others = [k for k in range(len(GESTURE_NAMES)) if k != self._gesture]
         if self._gesture is None and rng.random() < 0.15:
             self._next_arms = t + rng.uniform(1.0, 2.5)  # not yet
             return
         self._gesture = int(rng.choice(others))
-        self.arms.go(t, np.eye(len(GESTURES))[self._gesture], rng.uniform(*ARMS_S))
+        self.arms.go(t, np.eye(len(GESTURE_NAMES))[self._gesture], rng.uniform(*ARMS_S))
         self._next_arms = t + rng.uniform(*ARMS_S) + rng.uniform(2.5, 5.0)
 
     def _plan_fidget(self, t: float) -> None:
@@ -353,7 +379,16 @@ class ThinkingMotion:
             deg[eye, :2] += eyes
 
         weights = self.arms.value(t)
-        deg += np.tensordot(weights, _GESTURE_DEG, axes=1)
+        total = float(weights.sum())
+        if total > 1e-6:
+            # Each arm joint turns from rest towards the poses it is going to
+            # (slerp: the hand travels in front of the body, not through it).
+            mix = np.tensordot(weights, self._quats, axes=1)
+            mix /= np.linalg.norm(mix, axis=1, keepdims=True)
+            for k, joint in enumerate(ARM_JOINTS):
+                q = slerp(_REST_QUATS[k], mix[k], min(1.0, total))
+                deg[joint] = np.degrees(rotvec_from_quat(q))
+            deg += np.tensordot(weights, self._extra, axes=1)
         self._add_fidget(deg, t, env, weights)
 
         return np.radians(deg).reshape(POSE_DIM)

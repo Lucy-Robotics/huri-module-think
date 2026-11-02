@@ -6,7 +6,6 @@ import pytest
 from huri_think.motion import (
     EYE_JOINTS,
     GESTURE_NAMES,
-    GESTURES,
     HEAD,
     L_ELBOW,
     POSE_DIM,
@@ -82,11 +81,21 @@ def test_episodes_differ_in_their_poses():
     assert len(used) >= 5
 
 
+def _pose_deg(body, name):
+    """The full thinking pose `name` on `body`, degrees (55, 3)."""
+
+    motion = ThinkingMotion(intensity=0.0, arms=False, body=body)
+    motion.arms.go(0.0, np.eye(len(GESTURE_NAMES))[GESTURE_NAMES.index(name)], 0.0)
+    return _degrees(motion._frames(1, plan=False))[0]
+
+
 def test_left_poses_mirror_right_ones():
     for name in ("chin", "chin_hip", "crossed"):
-        right, left = GESTURES[name], GESTURES[name + "_left"]
-        np.testing.assert_allclose(left[L_ELBOW], right[R_ELBOW] * [1, -1, -1])
-        np.testing.assert_allclose(mirrored(left), right)
+        right, left = _pose_deg(None, name), _pose_deg(None, name + "_left")
+        np.testing.assert_allclose(
+            left[L_ELBOW], right[R_ELBOW] * [1, -1, -1], atol=1e-4
+        )
+        np.testing.assert_allclose(mirrored(left), right, atol=1e-4)
 
 
 def test_settle_lowers_a_raised_hand_slowly():

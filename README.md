@@ -123,6 +123,35 @@ the thinking eased back to rest.
 | `settle_s` | 0.6 | time to ease back to the neutral pose (longer with a raised hand) |
 | `fps`, `chunk_s`, `lead_s` | 30, 0.2, 0.15 | frame rate, chunk length, how far ahead of real time chunks are sent |
 | `seed` | random | a fixed seed replays the same episode |
+| `body` | an adult of 1.8 m | the body that plays the motion, so the hands land on it (below) |
+
+#### The body
+
+The thinking poses are not fixed angles: they say where the hands go (the
+fist under the chin, the other forearm across the belly under its elbow, a
+hand on the hip, each hand on the other arm) and are solved by inverse
+kinematics on the body's measurements, the elbows kept out of the torso
+(huri_think/body.py). A cartoon with short arms and a round belly, a child, a
+robot: give its measurements and the hands land on it. Metres, from the
+pelvis joint, in SMPL-X's axes and T-pose (x towards the body's left, y up,
+z forward), the left side only; any field left out keeps its default:
+
+```yaml
+think:
+  name: think
+  args:
+    body:
+      shoulder: [0.208, 0.529, -0.028]  # the left shoulder joint
+      upper_arm: 0.282                  # shoulder to elbow joint
+      forearm: 0.267                    # elbow to wrist joint
+      hand: 0.18                        # wrist to the middle fingertip
+      chin: [0.711, 0.126]              # the chin's tip: y, z
+      chest: [0.382, 0.134, 0.184]      # lower ribs: y, front z, half width
+      waist: [0.173, 0.14, 0.165]       # the navel: y, front z, half width
+      hip: [0.074, 0.15]                # where a hand rests: y, half width
+```
+
+HuRI-Playground measures its avatar's body from the 3D model and passes it.
 
 `think_say`:
 

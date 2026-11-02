@@ -23,7 +23,16 @@ again.
 import asyncio
 import time
 import weakref
-from typing import AsyncGenerator, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 
 import numpy as np
 from huri_core.core.module import ModuleWithId
@@ -32,6 +41,7 @@ from huri_events.motion import Motion
 from huri_events.question import RAGQuestion
 from huri_events.text import Token
 
+from huri_think.body import Body
 from huri_think.motion import ThinkingMotion
 from huri_think.speech import HUMS, OPENERS, STALLS, ThinkingVoice, pick
 
@@ -142,6 +152,9 @@ class Think(_Thinking):
     :intensity: amplitude of the motion (0 still, 1 natural, 2 theatrical).
     :arms: allow the thinking poses (hand at the chin, arms crossed...).
     :seed: makes the motion reproducible (random by default).
+    :body: measurements of the body that plays the motion (see
+        huri_think.body.Body: metres, from the pelvis, SMPL-X axes), so the
+        hands land on it; fields left out keep an adult's of 1.8 m.
     """
 
     input_type = "huri.question"
@@ -161,6 +174,7 @@ class Think(_Thinking):
         intensity: float = 1.0,
         arms: bool = True,
         seed: Optional[int] = None,
+        body: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(_user_id, delay_s, max_s, seed)
         if fps <= 0 or chunk_s <= 0 or lead_s < 0 or settle_s <= 0:
@@ -171,6 +185,7 @@ class Think(_Thinking):
         self.settle_s = float(settle_s)
         self.intensity = float(intensity)
         self.arms = bool(arms)
+        self.body = Body.from_mapping(body)
 
     def _motion(self, poses: np.ndarray, pts: float) -> Motion:
         n = poses.shape[0]
@@ -186,7 +201,9 @@ class Think(_Thinking):
         episode, since = self._begin()
         if not await self._wait_until(since + self.delay_s, episode, since):
             return  # a quick answer needs no thinking
-        motion = ThinkingMotion(self.fps, self.intensity, self.arms, self.rng)
+        motion = ThinkingMotion(
+            self.fps, self.intensity, self.arms, self.rng, body=self.body
+        )
         start = self._clock()
         pts = 0.0
         while True:
