@@ -95,6 +95,9 @@ class Body:
         return self.depth(point, margin) > 0.0
 
 
+# --- Rotations (quaternions are w, x, y, z) ---------------------------------
+
+
 def quat_from_matrix(m: np.ndarray) -> np.ndarray:
     w = np.sqrt(max(0.0, 1.0 + m[0, 0] + m[1, 1] + m[2, 2])) / 2
     x = np.sqrt(max(0.0, 1.0 + m[0, 0] - m[1, 1] - m[2, 2])) / 2
@@ -152,6 +155,9 @@ def slerp(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
 
 def _unit(v: np.ndarray) -> np.ndarray:
     return v / np.linalg.norm(v)
+
+
+# --- Arms --------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
