@@ -1,12 +1,9 @@
-"""The thinking poses solved on a body: the hands land where they should."""
-
 import numpy as np
 import pytest
 
 from huri_think.body import Body, arm_points, thinking_arms
 from huri_think.module import Think
 
-# A child, a tall adult and a cartoon (short arms, round belly, big head).
 BODIES = {
     "adult": Body(),
     "child": Body(
@@ -42,7 +39,6 @@ def test_the_arms_reach_their_targets_outside_the_body(name, active):
     for pose, arms in thinking_arms(body, active).items():
         for side, arm in arms.items():
             elbow, wrist = arm_points(body, side, arm.shoulder, arm.elbow)
-            # Forward kinematics of the solved angles agree with the solver.
             np.testing.assert_allclose(elbow, arm.elbow_at, atol=1e-6)
             np.testing.assert_allclose(wrist, arm.wrist_at, atol=1e-6)
             for point in (elbow, (elbow + wrist) / 2, wrist):
@@ -55,7 +51,6 @@ def test_the_hand_is_at_the_chin_on_any_body(name):
     arm = thinking_arms(body, -1.0)["chin"][-1.0]
     _, wrist = arm_points(body, -1.0, arm.shoulder, arm.elbow)
     chin = np.array([0.0, *body.chin])
-    # The wrist half a hand under the chin, the fist between them.
     assert np.linalg.norm(wrist - chin) < 0.7 * body.hand
 
 
@@ -63,7 +58,6 @@ def test_the_poses_follow_the_body():
     adult = thinking_arms(BODIES["adult"], -1.0)["chin"][-1.0]
     child = thinking_arms(BODIES["child"], -1.0)["chin"][-1.0]
     assert not np.allclose(adult.shoulder, child.shoulder, atol=1e-3)
-    # The same body bigger: the same angles.
     tall = thinking_arms(BODIES["tall"], -1.0)["chin"][-1.0]
     np.testing.assert_allclose(adult.shoulder, tall.shoulder, atol=1e-6)
     np.testing.assert_allclose(adult.elbow, tall.elbow, atol=1e-6)

@@ -1,47 +1,23 @@
-"""The body the thinking poses are made for, and the poses solved on it.
-
-A hand at the chin is not a fixed set of angles: it depends on how long the
-arms are, how far the chin is from the shoulders, how deep the belly is. The
-poses are given as where the hands go (under the chin, across the belly under
-the other elbow, on the hip, on the opposite arm) and solved by inverse
-kinematics on the body's measurements, so they land there on any body: a
-person, an avatar with a cartoon belly, a robot. Whoever plays the motion
-describes the body they play it on (`Body`, the `think` module's `body` arg);
-without it, an adult of 1.8 m.
-
-Measurements are in metres, from the pelvis joint, in SMPL-X's axes and rest
-pose (the T-pose: arms straight out to the sides): x towards the body's left,
-y up, z forward. Only the left side is given; the right one is its mirror.
-"""
-
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
-# Each field and its number of values (1: a length, which must be > 0).
 _SIZES = {
-    "shoulder": 3,  # the left shoulder joint: x, y, z
-    "upper_arm": 1,  # shoulder joint to elbow joint
-    "forearm": 1,  # elbow joint to wrist joint
-    "hand": 1,  # wrist joint to the tip of the middle finger
-    "chin": 2,  # the tip of the chin: y, z
-    "chest": 3,  # the chest, at the lower ribs: y, its front z, its half width
-    "waist": 3,  # the belly, at the navel: y, its front z, its half width
-    "hip": 2,  # where a hand rests on the hip: y, the hip's half width
+    "shoulder": 3,
+    "upper_arm": 1,
+    "forearm": 1,
+    "hand": 1,
+    "chin": 2,
+    "chest": 3,
+    "waist": 3,
+    "hip": 2,
 }
-# Anything bigger is not a body measured in metres.
 _MAX_M = 3.0
 
 
 @dataclass(frozen=True)
 class Body:
-    """A body's measurements (see the module's docstring for the axes).
-
-    The defaults are an adult man of 1.8 m (the Rocketbox avatar of
-    HuRI-Playground, measured).
-    """
-
     shoulder: Tuple[float, float, float] = (0.208, 0.529, -0.028)
     upper_arm: float = 0.282
     forearm: float = 0.267
@@ -53,9 +29,6 @@ class Body:
 
     @classmethod
     def from_mapping(cls, values: Optional[Mapping[str, Any]]) -> "Body":
-        """A body from a config's mapping; fields it leaves out keep their
-        defaults. Raises ValueError on anything that is not a measurement."""
-
         if values is None:
             return cls()
         if not isinstance(values, Mapping):
@@ -89,21 +62,13 @@ class Body:
 
     @property
     def radius(self) -> float:
-        """The forearm's thickness, from the skin to its axis."""
-
         return 0.16 * self.upper_arm
 
     def shoulder_at(self, side: float) -> np.ndarray:
-        """The shoulder joint of a side (+1 left, -1 right)."""
-
         x, y, z = self.shoulder
         return np.array([side * x, y, z])
 
     def front(self, y: float) -> Tuple[float, float]:
-        """The torso's front z and half width at height y: from the hip to
-        the waist, the waist's front narrowing to the hip's width; to the
-        chest, between theirs; above it, receding to the shoulders."""
-
         def lerp(y0: float, y1: float, v0: float, v1: float) -> float:
             f = float(np.clip((y - y0) / (y1 - y0), 0.0, 1.0)) if y1 != y0 else 1.0
             return v0 + (v1 - v0) * f
@@ -116,27 +81,18 @@ class Body:
         return lerp(y1, self.shoulder[1], z1, self.shoulder[2]), w1
 
     def depth(self, point: np.ndarray, margin: float) -> float:
-        """How far `point` (an arm's axis) is in the torso, its skin pushed
-        out by `margin`: 0 outside. The torso is what lies between the hip
-        and the shoulders, within its half width, behind its front, which
-        is round."""
-
         x, y, z = point
         if not self.hip[0] - margin < y < self.shoulder[1]:
             return 0.0
         front, half = self.front(y)
         if abs(x) >= half + margin:
             return 0.0
-        # Round: the front recedes to the shoulders' plane at the sides.
         side_z = self.shoulder[2]
         bulge = (front - side_z) * np.sqrt(max(0.0, 1.0 - (x / (half + margin)) ** 2))
         return max(0.0, min(side_z + bulge + margin - z, half + margin - abs(x)))
 
     def inside(self, point: np.ndarray, margin: float) -> bool:
         return self.depth(point, margin) > 0.0
-
-
-# --- Rotations (quaternions are w, x, y, z) ---------------------------------
 
 
 def quat_from_matrix(m: np.ndarray) -> np.ndarray:
@@ -198,14 +154,8 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return v / np.linalg.norm(v)
 
 
-# --- Arms --------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class ArmPose:
-    """One arm's joints, as SMPL-X local rotations (rotation vectors), and
-    where they put its elbow and wrist."""
-
     shoulder: np.ndarray
     elbow: np.ndarray
     elbow_at: np.ndarray
@@ -215,9 +165,6 @@ class ArmPose:
 def arm_points(
     body: Body, side: float, shoulder: np.ndarray, elbow: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Forward kinematics: elbow and wrist positions of an arm whose shoulder
-    and elbow joints have these local rotations (the spine at rest)."""
-
     rest = np.array([side, 0.0, 0.0])
     q_shoulder = quat_from_rotvec(shoulder)
     s = body.shoulder_at(side)
@@ -230,14 +177,6 @@ def arm_points(
 def _elbow(
     body: Body, s: np.ndarray, wrist: np.ndarray, pole: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, float]:
-    """Elbow and wrist of a two-bone arm from shoulder `s` towards `wrist`
-    (as close as it reaches), and how far the arm then is in the torso.
-
-    The elbow is on the circle where both lengths meet; `pole` picks the
-    point on it, turned further and further either way while the upper arm
-    or the forearm would be in the torso (else the turn where they go in
-    least)."""
-
     a, b = body.upper_arm, body.forearm
     to_wrist = wrist - s
     d = float(np.clip(np.linalg.norm(to_wrist), abs(a - b) + 1e-3, (a + b) * 0.999))
@@ -245,7 +184,7 @@ def _elbow(
     cos_a = (a * a + d * d - b * b) / (2 * a * d)
     sin_a = np.sqrt(max(0.0, 1.0 - cos_a * cos_a))
     v0 = pole - np.dot(pole, u) * u
-    if np.linalg.norm(v0) < 1e-6:  # the pole along the arm: any side will do
+    if np.linalg.norm(v0) < 1e-6:
         v0 = np.cross(u, [0.0, 0.0, 1.0])
     v0 = _unit(v0)
     w_axis = np.cross(u, v0)
@@ -254,7 +193,6 @@ def _elbow(
     for deg in [0] + [k * sign for k in range(10, 190, 10) for sign in (1, -1)]:
         turn = np.radians(deg)
         e = s + a * (cos_a * u + sin_a * (np.cos(turn) * v0 + np.sin(turn) * w_axis))
-        # Along the upper arm and the forearm.
         points = [s + (e - s) * 0.5, e, e + (w - e) * 0.5, w]
         depth = sum(body.depth(p, 0.8 * body.radius) for p in points)
         if depth < least:
@@ -267,15 +205,6 @@ def _elbow(
 def reach(
     body: Body, side: float, wrist: Sequence[float], pole: Sequence[float]
 ) -> ArmPose:
-    """The arm of `side` (+1 left, -1 right) with its wrist at `wrist`, its
-    elbow towards `pole` (a direction) and out of the torso.
-
-    On a body where no elbow keeps the arm out of the torso (a round belly
-    before short arms), the hand goes further forward until one does. The
-    elbow is a hinge about the upper arm's own y (SMPL-X's: it bends the
-    forearm forward from the T-pose), which fixes the upper arm's twist.
-    """
-
     s = body.shoulder_at(side)
     target = np.asarray(wrist, dtype=float)
     pole = np.asarray(pole, dtype=float)
@@ -289,7 +218,7 @@ def reach(
     bend = float(np.arccos(np.clip(np.dot(e1, e2), -1.0, 1.0)))
     p = e2 - np.dot(e2, e1) * e1
     p = _unit(p) if np.linalg.norm(p) > 1e-6 else _unit(np.cross(e1, [0.0, 1.0, 0.0]))
-    x_axis = side * e1  # where the rest pose's x goes
+    x_axis = side * e1
     z_axis = p
     y_axis = np.cross(z_axis, x_axis)
     q = quat_from_matrix(np.column_stack([x_axis, y_axis, z_axis]))
@@ -302,27 +231,18 @@ def reach(
 
 
 def thinking_arms(body: Body, active: float) -> Dict[str, Dict[float, ArmPose]]:
-    """The thinking poses, the hand of side `active` (+1 left, -1 right) the
-    one at the chin or on top: pose name -> side -> ArmPose."""
-
     h, r = body.hand, body.radius
-    a, o = active, -active  # the active side, the other
+    a, o = active, -active
     chin_y, chin_z = body.chin
 
-    # The fist under the chin, the wrist bent back below it: the wrist a
-    # little in front of and below the chin, to its own side; the elbow down
-    # in front of the belly.
     chin_wrist = (a * 0.1 * h, chin_y - 0.5 * h, chin_z + 0.3 * h)
     chin = reach(body, a, chin_wrist, (o * 0.25, -1.0, 0.6))
 
-    # The other forearm across the belly, holding the active elbow: its wrist
-    # a hand short of that elbow, a forearm's thickness below it.
     e = chin.elbow_at
     under_y = e[1] - 1.5 * r
     under = (e[0] + o * 0.5 * h, under_y, max(e[2], body.front(under_y)[0] + r))
     support = reach(body, o, under, (o * 0.6, -1.0, 0.1))
 
-    # The other hand on the hip, the elbow out and a little back.
     hip_y = body.hip[0] + 0.4 * h
     on_hip = reach(
         body,
@@ -331,9 +251,6 @@ def thinking_arms(body: Body, active: float) -> Dict[str, Dict[float, ArmPose]]:
         (o, -0.2, -0.7),
     )
 
-    # Arms crossed in front of the lower chest, the active forearm resting on
-    # the other, above and in front of it: each hand holds the other arm, so
-    # each wrist is past the middle, short of that arm by most of a hand.
     cross_y = (body.chest[0] + body.waist[0]) / 2
     front, half = body.front(cross_y)
     grip = half + r - 0.6 * h

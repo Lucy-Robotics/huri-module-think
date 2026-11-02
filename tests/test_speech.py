@@ -1,5 +1,3 @@
-"""The thinking phrases, spoken by a real Piper voice when one is available."""
-
 import os
 
 import numpy as np
