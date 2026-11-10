@@ -1,8 +1,3 @@
-"""The modules: thinking starts with a question and ends with the answer.
-
-Time is fake: sleeping advances the clock instantly.
-"""
-
 import asyncio
 import itertools
 
@@ -26,8 +21,6 @@ QUESTION = RAGQuestion.from_wire({"text": "what is the meaning of life?"})
 
 
 def _voice(text="Well,"):
-    """Audio of the answer, as the TTS sends it."""
-
     return Audio(np.full(len(text) * 100, 0.1, np.float32), 22050, False, 0.0)
 
 
@@ -55,8 +48,6 @@ def fake_time(monkeypatch):
 
 
 class FakeVoice:
-    """Stands for a Piper voice: 0.1 s of a tone per character said."""
-
     class config:
         sample_rate = 22050
 
@@ -86,14 +77,11 @@ def user():
 
 
 async def _collect(module, question, fake_time, answer_after=None, user=None):
-    """Everything `module` emits for `question`, with the answer starting
-    `answer_after` seconds later (never when None), and when each came."""
-
     start = fake_time.now
 
     async def answer():
         while fake_time.now - start < answer_after:
-            await asyncio.sleep(0)  # the module's sleeps move the clock
+            await asyncio.sleep(0)
         await ThinkStop(_user_id=user).process(_voice("Well,"))
 
     answering = asyncio.ensure_future(answer()) if answer_after is not None else None
@@ -110,7 +98,6 @@ def test_think_moves_until_the_answer_then_settles(fake_time, user):
     out = asyncio.run(_collect(think, QUESTION, fake_time, 3.0, user))
     times, motions = zip(*out)
     assert all(isinstance(m, Motion) and m.fps == 30 for m in motions)
-    # Starts after delay_s, continues in time, ends soon after the answer.
     assert times[0] == pytest.approx(0.3, abs=0.06)
     pts = [m.pts for m in motions]
     assert pts[0] == 0.0 and pts == sorted(pts)
@@ -119,7 +106,7 @@ def test_think_moves_until_the_answer_then_settles(fake_time, user):
     assert 3.0 <= times[-1] <= 3.0 + 0.25
     np.testing.assert_allclose(motions[0].poses[0], REST_POSE, atol=1e-6)
     np.testing.assert_allclose(motions[-1].poses[-1], REST_POSE, atol=1e-6)
-    assert motions[-1].poses.shape[0] >= 0.6 * 30  # the settle chunk
+    assert motions[-1].poses.shape[0] >= 0.6 * 30
 
 
 def test_think_is_sent_a_little_ahead_of_real_time(fake_time, user):
@@ -181,14 +168,14 @@ def test_a_new_question_takes_over(fake_time, user):
         async for item in think.process(QUESTION):
             first.append(item)
             if len(first) == 3:
-                second = think.process(QUESTION)  # the next question arrives
+                second = think.process(QUESTION)
                 next_one = asyncio.ensure_future(second.__anext__())
         await next_one
         await second.aclose()
         return first
 
     first = asyncio.run(scenario())
-    assert len(first) == 4  # three chunks, then it settled at once
+    assert len(first) == 4
     np.testing.assert_allclose(first[-1].poses[-1], REST_POSE, atol=1e-6)
 
 
@@ -198,7 +185,6 @@ def test_think_say_hums_when_the_answer_is_slow(fake_time, user, fake_voice):
     times, audios = zip(*out)
     assert all(isinstance(a, Audio) and a.sample_rate == 22050 for a in audios)
     assert times[0] == pytest.approx(1.5, abs=0.06)
-    # One hum and its end marker, then the answer came.
     assert [a.end for a in audios] == [False, True]
     assert audios[0].data.size > 0 and audios[1].data.size == 0
     assert audios[1].pts == pytest.approx(audios[0].data.size / 22050)
@@ -228,8 +214,6 @@ def test_think_say_is_silent_after_a_quick_answer(fake_time, user, fake_voice):
 
 
 def test_think_say_falls_silent_once_the_answer_is_written(fake_time, user, fake_voice):
-    """Its voice comes soon: a phrase now would only delay it."""
-
     say = ThinkSay(_user_id=user, seed=0, hum_s=1.5)
 
     async def scenario():
@@ -265,8 +249,6 @@ def test_think_keeps_moving_while_the_answer_is_written(fake_time, user):
 
 
 def test_think_say_does_not_stop_itself(fake_time, user):
-    """Its phrases go to think_stop too: they are not the answer."""
-
     say = ThinkSay(_user_id=user, seed=0, hum_s=0.1, think_s=0.2, max_stalls=0)
     stop = ThinkStop(_user_id=user)
 
@@ -277,7 +259,7 @@ def test_think_say_does_not_stop_itself(fake_time, user):
             await stop.process(audio)
         return out
 
-    assert len(asyncio.run(scenario())) == 4  # hum and words, each with its end
+    assert len(asyncio.run(scenario())) == 4
 
 
 def test_only_sound_tells_the_answer_started(fake_time, user):
@@ -316,8 +298,6 @@ def test_bad_args_are_refused(cls, kwargs):
 
 
 def test_installed_modules_pass_the_server_checks():
-    """What the server verifies at startup: entry points, events, manifests."""
-
     modules = load_modules(NAMES)
     events = load_events()
     check_modules(modules, events)
@@ -327,8 +307,6 @@ def test_installed_modules_pass_the_server_checks():
 
 
 def test_a_session_with_rag_is_complete():
-    """think_stop needs the voice of a TTS; think starts from questions."""
-
     class Rag:
         input_type, output_type = "huri.question", "huri.token"
 

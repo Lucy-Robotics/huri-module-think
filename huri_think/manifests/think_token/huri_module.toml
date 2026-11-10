@@ -1,4 +1,3 @@
-# Terminal: no output. Silences `think_say` once the answer is being written.
 name = "think_token"
 summary = "Silences think_say once the answer is being written (its voice comes soon)"
 input = { topic = "huri.token", event = "huri_events.text:Token" }
